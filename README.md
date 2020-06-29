@@ -12,13 +12,11 @@ and set the environment variables
 
 - MYEXEC_REPLACE
 
-inside MYEXEC_REPLACE path must be absolute.
-
 ## Example:
 
 ```C
-[r.pancheri@PC myexec]$ export MYEXEC_MATCH="cat"
-[r.pancheri@PC myexec]$ export MYEXEC_REPLACE="/bin/echo cat replaced with echo: "
+[r.pancheri@PC myexec]$ export MYEXEC_MATCH="^/bin/cat"
+[r.pancheri@PC myexec]$ export MYEXEC_REPLACE="echo cat replaced with echo: "
 [r.pancheri@PC myexec]$ LD_PRELOAD=myexec.so bash
 [r.pancheri@PC myexec]$ cat 123
 cat replaced with echo: 123
@@ -32,7 +30,11 @@ https://github.com/pymumu/tinylog
 
 ## Build Dependencies:
 
-pthread, libld, glibc headers, wget
+pthread, libld, glibc headers, wget, pcre2 + pcre2 headers
+
+## Run Dependencies:
+
+pcre2
 
 ## How to compile:
 
