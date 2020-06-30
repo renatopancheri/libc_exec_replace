@@ -17,17 +17,11 @@ int __thread (*_execvp)(const char * file, char *const argv[]) = NULL;
 
 static int my_tlog_format(char *buff, int maxlen, struct tlog_loginfo *info, void *userptr, const char *format, va_list ap);
 
-#define MYEXEC_VECTOR_SIZE 1024
+#define MYEXEC_VECTOR_SIZE 8192
 #define MYEXEC_MAX_WORDS 64
 char log_path[100];
 char myexec_match_content[MYEXEC_VECTOR_SIZE];
 char myexec_replace_content[MYEXEC_VECTOR_SIZE];
-pcre2_code *re=NULL;
-int errornumber;
-PCRE2_SIZE erroroffset;
-pcre2_match_data *match_data=NULL;
-PCRE2_SIZE buffer_size=MYEXEC_VECTOR_SIZE;
-PCRE2_UCHAR buffer[MYEXEC_VECTOR_SIZE];
 char *myexec_return[MYEXEC_MAX_WORDS];
 
 /**
@@ -42,7 +36,7 @@ void myexec_log(const char* format, ...)
 #ifdef VERBOSE
     va_list arg;
     va_start (arg, format);
-    char temp[1000];
+    char temp[MYEXEC_VECTOR_SIZE];
     vsprintf(temp, format, arg);
     tlog_reg_format_func(NULL);
     tlog_init(log_path, 64 * 1024 * 1024, 0, 0, TLOG_MULTI_WRITE);
@@ -83,6 +77,12 @@ char** myexec_compare(const char* function_name, char *const argv[])
     size_t argc,pos=0;
     bool match=true;
     char temp[MYEXEC_VECTOR_SIZE];
+    pcre2_code *re=NULL;
+    int errornumber;
+    PCRE2_SIZE erroroffset;
+    pcre2_match_data *match_data=NULL;
+    PCRE2_SIZE buffer_size=MYEXEC_VECTOR_SIZE;
+    PCRE2_UCHAR buffer[MYEXEC_VECTOR_SIZE];
     for(argc=0;match && argv[argc]!=NULL ;argc++)
     {
         strcpy(&temp[pos], argv[argc]);
@@ -92,6 +92,27 @@ char** myexec_compare(const char* function_name, char *const argv[])
     }
     temp[pos-1]='\0';
     myexec_log("%s, args:%s", function_name, temp);
+    re = pcre2_compile(
+        myexec_match_content,               /* the pattern */
+        PCRE2_ZERO_TERMINATED, /* indicates pattern is zero-terminated */
+        0,                     /* default options */
+        &errornumber,          /* for error number */
+        &erroroffset,          /* for error offset */
+        NULL);
+    if (re == NULL)
+    {
+        PCRE2_UCHAR buffer[256];
+        pcre2_get_error_message(errornumber, buffer, sizeof(buffer));
+        myexec_log("PCRE2 compilation failed at offset %d: %s", (int)erroroffset,buffer);
+        return NULL;
+    }
+    match_data = pcre2_match_data_create_from_pattern(re, NULL);
+    if(match_data == NULL)
+    {
+        pcre2_code_free(re);
+        myexec_log("PCRE2 match data create failed!");
+        return NULL;
+    }
     errornumber=pcre2_substitute(
         re,
         temp,
@@ -105,11 +126,12 @@ char** myexec_compare(const char* function_name, char *const argv[])
         buffer,
         &buffer_size
     );
+    pcre2_match_data_free(match_data);
+    pcre2_code_free(re);
     if(errornumber<0)
     {
         pcre2_get_error_message(errornumber, buffer, sizeof(buffer));
-        printf("PCRE2 compilation failed at offset %d: %s\n", (int)erroroffset,buffer);
-        myexec_log("PCRE2 compilation failed at offset %d: %s\n", (int)erroroffset,buffer);
+        myexec_log("PCRE2 substitute failed: %s", buffer);
         return NULL;
     }
     if(errornumber==0)
@@ -228,20 +250,6 @@ int main_hook(int argc, char **argv, char **envp)
         printf("Missing environment variables: %s %s %s\n", found_myexec_match ? "true" : "false", found_myexec_replace ? "true" : "false", found_home ? "true" : "false");
         return 1;
     }
-    re = pcre2_compile(
-        myexec_match_content,               /* the pattern */
-        PCRE2_ZERO_TERMINATED, /* indicates pattern is zero-terminated */
-        0,                     /* default options */
-        &errornumber,          /* for error number */
-        &erroroffset,          /* for error offset */
-        NULL);
-    if (re == NULL){
-        PCRE2_UCHAR buffer[256];
-        pcre2_get_error_message(errornumber, buffer, sizeof(buffer));
-        printf("PCRE2 compilation failed at offset %d: %s\n", (int)erroroffset,buffer);
-        return 1;
-    }
-    match_data = pcre2_match_data_create_from_pattern(re, NULL);
     myexec_log("process started, MATCH=%s, REPLACE=%s\n", myexec_match_content, myexec_replace_content);
     //save the original functions that we are redefining
     _execve = (int (*)(const char * file, char *const argv[], char *const envp[])) dlsym(RTLD_NEXT, "execve");
@@ -249,8 +257,6 @@ int main_hook(int argc, char **argv, char **envp)
     _execvpe = (int (*)(const char * file, char *const argv[], char *const envp[])) dlsym(RTLD_NEXT, "execvpe");
     _execvp = (int (*)(const char * file, char *const argv[])) dlsym(RTLD_NEXT, "execvp");
     int ret = main_orig(argc, argv, envp);
-    pcre2_match_data_free(match_data);
-    pcre2_code_free(re);
     return ret;
 }
 
